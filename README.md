@@ -31,7 +31,14 @@ curl http://localhost/price        # or :8080 if you chose a different port
 
 ## Install & expose (asks you what to track)
 
+One command (clones, chmod, runs the interactive installer):
 ```bash
+curl -fsSL https://raw.githubusercontent.com/sarakmacbook/okx-p2p-api/main/install.sh | bash
+```
+Or manually:
+```bash
+git clone https://github.com/sarakmacbook/okx-p2p-api.git
+cd okx-p2p-api
 chmod +x expose.sh
 ./expose.sh
 ```
