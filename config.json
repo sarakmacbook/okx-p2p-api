@@ -1,0 +1,6 @@
+{
+  "merchant": "0x200x",
+  "fiat": "USD",
+  "pay": "ABA Bank",
+  "refresh": 60
+}

@@ -4,32 +4,50 @@
 Pure stdlib (http.server) -- no external dependencies.
 A background thread refreshes OKX every REFRESH_SEC so GET /price is instant.
 
+Config (in order of precedence: config.json in this dir, then env vars, then defaults):
+  merchant  -> OKX nickname to track        (default "0x200x")
+  fiat      -> quote currency                (default "USD")
+  pay       -> payment-method substring      (default "ABA Bank"; use "all" for no filter)
+  refresh   -> OKX poll interval in seconds  (default 60)
+
 Endpoints (GET, JSON):
   /price    -> {buy_best, sell_best, ranges, rate, done, updated}
   /health   -> {ok, updated, error}
   /raw      -> full filtered ad list (diagnostics)
 
-Env / args:
-  --host 0.0.0.0   (default: 0.0.0.0 -- bind all interfaces)
-  --port 8080
-Config (module constants): FIAT, MERCHANT, PAY, REFRESH_SEC
-
 Run:
   python3 api_server.py --host 0.0.0.0 --port 8080
 """
 from __future__ import annotations
-import argparse, json, threading, time, urllib.request, urllib.parse
+import argparse, json, os, threading, time, urllib.request, urllib.parse
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-# ---- config: edit these for your merchant ----
-FIAT = "USD"
-MERCHANT = "0x200x"
-PAY = "ABA Bank"
-REFRESH_SEC = 60
-# ----------------------------------------------
-
 API = "https://www.okx.com/v3/c2c/tradingOrders/books"
+
+
+def load_config() -> dict:
+    cfg = {"merchant": "0x200x", "fiat": "USD", "pay": "ABA Bank", "refresh": 60}
+    here = os.path.dirname(os.path.abspath(__file__))
+    cj = os.path.join(here, "config.json")
+    if os.path.exists(cj):
+        try:
+            cfg.update(json.load(open(cj)))
+        except Exception:
+            pass
+    cfg["merchant"] = os.getenv("MERCHANT", cfg["merchant"])
+    cfg["fiat"] = os.getenv("FIAT", cfg["fiat"])
+    cfg["pay"] = os.getenv("PAY", cfg["pay"])
+    try:
+        cfg["refresh"] = int(os.getenv("REFRESH_SEC", cfg["refresh"]))
+    except ValueError:
+        pass
+    return cfg
+
+
+C = load_config()
+MERCHANT, FIAT, PAY, REFRESH_SEC = C["merchant"], C["fiat"], C["pay"], C["refresh"]
+
 _state: dict = {"data": None, "updated": None, "error": None}
 _lock = threading.Lock()
 
@@ -51,7 +69,8 @@ def _fetch_side(side: str) -> list[dict]:
 
 def _filter(orders: list[dict]) -> list[dict]:
     out = [o for o in orders if o.get("nickName", "").lower() == MERCHANT.lower()]
-    out = [o for o in out if PAY.lower() in [p.lower() for p in o.get("paymentMethods", [])]]
+    if PAY and PAY.lower() != "all":
+        out = [o for o in out if PAY.lower() in [p.lower() for p in o.get("paymentMethods", [])]]
     return out
 
 
@@ -59,7 +78,7 @@ def _summarize() -> dict:
     buy = _filter(_fetch_side("buy"))
     sell = _filter(_fetch_side("sell"))
     if not buy and not sell:
-        raise RuntimeError("merchant has no ABA ads right now")
+        raise RuntimeError("merchant has no ads in this fiat/payment right now")
     rate = (buy or sell)[0].get("completedRate")
     done = (buy or sell)[0].get("completedOrderQuantity")
 
