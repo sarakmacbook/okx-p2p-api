@@ -49,7 +49,8 @@ During install it interactively asks:
 2. **Fiat / quote currency** (USD EUR TRY CNY RUB INR NGN VND IDR ZAR PHP UAH)
 3. **Payment method** to filter on (e.g. `ABA Bank`; `all` for no filter)
 4. **Listen port** (default **80**; ports below 1024 start with `sudo`)
-5. **Custom domain** (optional — leave blank if you don't have one)
+5. **Refresh interval** in seconds (default **60**; must be ≥ 10 to respect OKX rate limits)
+6. **Custom domain** (optional — leave blank if you don't have one)
 
 It then **validates the merchant has live ads on OKX** (aborts with a clear message if
 not), writes `config.json`, starts the API on `0.0.0.0:PORT`, opens the **OS** firewall

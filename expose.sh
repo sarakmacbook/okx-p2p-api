@@ -39,7 +39,11 @@ if [[ -n "${FIAT:-}" ]];      then F="$FIAT";      else ask "Fiat/quote currency
 if [[ -n "${PAY:-}" ]];       then P="$PAY";        else ask "Payment method to filter (e.g. 'ABA Bank'; 'all' for no filter)" "ABA Bank"; P="$REPLY"; fi
 if [[ -n "${PORT_ARG:-}" ]];  then PORT="$PORT_ARG"; else ask "Listen port" "80"; PORT="$REPLY"; fi
 if [[ -n "${DOMAIN:-}" ]];    then D="$DOMAIN"; else ask "Custom domain to use (leave blank if none)" ""; D="$REPLY"; fi
-REFRESH="${REFRESH_SEC:-60}"
+if [[ -n "${REFRESH_ARG:-}" ]]; then REFRESH="$REFRESH_ARG"; else ask "Refresh interval in seconds (OKX poll)" "60"; REFRESH="$REPLY"; fi
+if ! [[ "$REFRESH" =~ ^[0-9]+$ ]] || [[ "$REFRESH" -lt 10 ]]; then
+  echo "  ! refresh must be an integer >= 10 (to respect OKX rate limits). Using 60."
+  REFRESH=60
+fi
 
 echo
 echo "==> Validating merchant '$M' on OKX P2P ($F) ..."
