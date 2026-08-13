@@ -16,7 +16,7 @@
 #
 set -euo pipefail
 
-PORT="${PORT:-8080}"
+PORT="${PORT:-80}"
 HOST="${HOST:-0.0.0.0}"
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PIDFILE="$DIR/.api.pid"
@@ -37,6 +37,8 @@ echo "=============================================="
 if [[ -n "${MERCHANT:-}" ]]; then M="$MERCHANT"; else ask "OKX merchant nickname to track" "0x200x"; M="$REPLY"; fi
 if [[ -n "${FIAT:-}" ]];      then F="$FIAT";      else ask "Fiat/quote currency (USD EUR TRY CNY RUB INR NGN VND IDR ZAR PHP UAH)" "USD"; F="$REPLY"; fi
 if [[ -n "${PAY:-}" ]];       then P="$PAY";        else ask "Payment method to filter (e.g. 'ABA Bank'; 'all' for no filter)" "ABA Bank"; P="$REPLY"; fi
+if [[ -n "${PORT_ARG:-}" ]];  then PORT="$PORT_ARG"; else ask "Listen port" "80"; PORT="$REPLY"; fi
+if [[ -n "${DOMAIN:-}" ]];    then D="$DOMAIN"; else ask "Custom domain to use (leave blank if none)" ""; D="$REPLY"; fi
 REFRESH="${REFRESH_SEC:-60}"
 
 echo
@@ -85,10 +87,12 @@ echo "==> wrote $CFGFILE"
 
 # --- start API ---
 echo "==> Starting API on $HOST:$PORT"
+RUN="python3 $DIR/api_server.py --host $HOST --port $PORT"
+if [[ "$PORT" -lt 1024 ]]; then RUN="sudo $RUN"; fi   # privileged port needs root
 if [[ -f "$PIDFILE" ]] && kill -0 "$(cat "$PIDFILE")" 2>/dev/null; then
   echo "    API already running (pid $(cat "$PIDFILE"))"
 else
-  nohup python3 "$DIR/api_server.py" --host "$HOST" --port "$PORT" >"$DIR/api.log" 2>&1 &
+  nohup $RUN >"$DIR/api.log" 2>&1 &
   echo $! >"$PIDFILE"
   sleep 2
   echo "    started pid $(cat "$PIDFILE")"
@@ -126,4 +130,22 @@ fi
 echo "==> Local health:"
 curl -s --max-time 8 "http://127.0.0.1:$PORT/health" || true
 echo
-echo "Done. Logs: $DIR/api.log   Stop: kill \$(cat $DIR/.api.pid)"
+
+# --- domain guidance ---
+if [[ -n "$D" ]]; then
+  echo "==> Custom domain: $D"
+  if [[ "$PORT" == "80" ]]; then
+    echo "    Add this DNS record to use your domain:"
+    echo "      Type: A    Name: $D    Value: $PUB_IP    TTL: 300"
+    echo "    Then access: http://$D/price"
+  else
+    echo "    Port $PORT is not 80, so a plain A record won't serve on :80."
+    echo "    Either re-run with port 80, or add:"
+    echo "      Type: A    Name: $D    Value: $PUB_IP    TTL: 300"
+    echo "    and access: http://$D:$PORT/price"
+  fi
+  echo "    (This is plain HTTP. For HTTPS on your domain, put a reverse proxy /"
+  echo "     ACME in front, or use a host with managed TLS.)"
+fi
+
+echo "Done. Logs: $DIR/api.log   Stop: kill $(cat $DIR/.api.pid)"
