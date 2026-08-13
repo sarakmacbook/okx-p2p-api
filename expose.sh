@@ -33,10 +33,67 @@ echo "=============================================="
 echo " OKX P2P price API -- setup"
 echo "=============================================="
 
-# --- interactive prompts (skipped if env vars set) ---
+# --- merchant + fiat first ---
 if [[ -n "${MERCHANT:-}" ]]; then M="$MERCHANT"; else ask "OKX merchant nickname to track" "0x200x"; M="$REPLY"; fi
 if [[ -n "${FIAT:-}" ]];      then F="$FIAT";      else ask "Fiat/quote currency (USD EUR TRY CNY RUB INR NGN VND IDR ZAR PHP UAH)" "USD"; F="$REPLY"; fi
-if [[ -n "${PAY:-}" ]];       then P="$PAY";        else ask "Payment method to filter (e.g. 'ABA Bank'; 'all' for no filter)" "ABA Bank"; P="$REPLY"; fi
+
+# --- fetch merchant's live ads to discover their real payment methods ---
+echo "==> Looking up '$M' on OKX P2P ($F) ..."
+PAYMENTS="$(python3 - "$M" "$F" <<'PY'
+import sys, json, urllib.request, urllib.parse
+m, f = sys.argv[1], sys.argv[2]
+def fetch(side):
+    params={"quoteCurrency":f,"baseCurrency":"USDT","side":side,"paymentMethod":"all","userType":"all","showTrade":"false","showFollow":"false","showAlreadyTraded":"false","isAbleFilter":"false"}
+    url="https://www.okx.com/v3/c2c/tradingOrders/books?"+urllib.parse.urlencode(params)
+    req=urllib.request.Request(url,headers={"User-Agent":"Mozilla/5.0","Accept":"application/json"})
+    return json.loads(urllib.request.urlopen(req,timeout=25).read().decode())["data"].get(side,[])
+ads=[o for o in fetch("buy")+fetch("sell") if o.get("nickName","").lower()==m.lower()]
+if not ads:
+    print("__NONE__")
+    sys.exit(2)
+methods=sorted({x for o in ads for x in o.get("paymentMethods",[])})
+print(json.dumps(methods))
+PY
+)"
+if [[ "$PAYMENTS" == "__NONE__" ]]; then
+  echo "  ! No live ads found for merchant '$M' in $F."
+  echo "    Check the nickname/spelling and fiat. (OKX only exposes a merchant when they"
+  echo "    have a LIVE ad in the fiat you query.) Aborting."
+  exit 2
+fi
+echo "  found merchant. completion rate: $(python3 - "$M" "$F" <<'PY'
+import sys,json,urllib.request,urllib.parse
+m,f=sys.argv[1],sys.argv[2]
+def fetch(s):
+    p={"quoteCurrency":f,"baseCurrency":"USDT","side":s,"paymentMethod":"all","userType":"all","showTrade":"false","showFollow":"false","showAlreadyTraded":"false","isAbleFilter":"false"}
+    u="https://www.okx.com/v3/c2c/tradingOrders/books?"+urllib.parse.urlencode(p)
+    r=urllib.request.Request(u,headers={"User-Agent":"Mozilla/5.0","Accept":"application/json"})
+    return json.loads(urllib.request.urlopen(r,timeout=25).read().decode())["data"].get(s,[])
+o=next((x for x in fetch("buy")+fetch("sell") if x.get("nickName","").lower()==m.lower()),None)
+print(o.get("completedRate"),"  completed orders:",o.get("completedOrderQuantity")) if o else print("?")
+PY
+)"
+
+# --- payment method: show numbered list, let user pick ---
+mapfile -t PMETHODS < <(python3 -c "import json,sys; [print(x) for x in json.loads('$PAYMENTS')]")
+echo
+echo "  Payment methods available for '$M':"
+for i in "${!PMETHODS[@]}"; do echo "    $((i+1))) ${PMETHODS[$i]}"; done
+echo "    $((${#PMETHODS[@]}+1))) all (no filter)"
+if [[ -n "${PAY:-}" ]]; then
+  P="$PAY"   # env preset (substring match)
+elif [[ -n "${PAY_IDX:-}" ]]; then
+  idx=$((PAY_IDX-1)); P="${PMETHODS[$idx]:-all}"
+else
+  read -r -p "Select payment method [1-$((${#PMETHODS[@]}+1)), default 1]: " CHOICE || true
+  CHOICE="${CHOICE:-1}"
+  if [[ "$CHOICE" == "$((${#PMETHODS[@]}+1))" ]] || [[ "${CHOICE,,}" == "all" ]]; then P="all"
+  elif [[ "$CHOICE" =~ ^[0-9]+$ ]] && [[ "$CHOICE" -ge 1 ]] && [[ "$CHOICE" -le "${#PMETHODS[@]}" ]]; then P="${PMETHODS[$((CHOICE-1))]}"
+  else P="${PMETHODS[0]}"; fi
+fi
+echo "  -> tracking payment: $P"
+
+# --- remaining prompts ---
 if [[ -n "${PORT_ARG:-}" ]];  then PORT="$PORT_ARG"; else ask "Listen port" "80"; PORT="$REPLY"; fi
 if [[ -n "${DOMAIN:-}" ]];    then D="$DOMAIN"; else ask "Custom domain to use (leave blank if none)" ""; D="$REPLY"; fi
 if [[ -n "${REFRESH_ARG:-}" ]]; then REFRESH="$REFRESH_ARG"; else ask "Refresh interval in seconds (OKX poll)" "60"; REFRESH="$REPLY"; fi
@@ -46,8 +103,8 @@ if ! [[ "$REFRESH" =~ ^[0-9]+$ ]] || [[ "$REFRESH" -lt 10 ]]; then
 fi
 
 echo
-echo "==> Validating merchant '$M' on OKX P2P ($F) ..."
-# hit the live API for both sides, filter by merchant(+pay), report what we find
+echo "==> Validating selection ..."
+# re-fetch and confirm the chosen payment actually has ads
 python3 - "$M" "$F" "$P" <<'PY'
 import sys, json, urllib.request, urllib.parse
 m, f, p = sys.argv[1], sys.argv[2], sys.argv[3]
@@ -62,19 +119,13 @@ def filt(orders):
     return out
 buy=filt(fetch("buy")); sell=filt(fetch("sell"))
 if not buy and not sell:
-    print(f"  ! No ads found for merchant '{m}' in {f} with payment '{p}'.")
-    print("    Check the nickname/spelling, fiat, and payment method. (The OKX orders API")
-    print("    only exposes a merchant when they have a LIVE ad in the fiat you query.)")
+    print(f"  ! No ads for '{m}' in {f} with payment '{p}'. Try 'all' or another method.")
     sys.exit(2)
 def line(ads,side):
     if not ads: print(f"  {side}: no ads"); return
     pr=sorted(float(o['price']) for o in ads)
     print(f"  {side}: best {'%.4f'%pr[-1] if side=='buy' else '%.4f'%pr[0]}  range {pr[0]:.4f}-{pr[-1]:.4f}  ({len(ads)} ads)")
-print(f"  Found merchant '{m}':")
 line(buy,"BUY"); line(sell,"SELL")
-if buy or sell:
-    o=(buy or sell)[0]
-    print(f"  completion rate: {o.get('completedRate')}   completed orders: {o.get('completedOrderQuantity')}")
 PY
 echo "  validation OK."
 

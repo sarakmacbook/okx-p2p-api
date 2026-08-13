@@ -47,7 +47,9 @@ During install it interactively asks:
 
 1. **OKX merchant nickname** to track (e.g. `0x200x`)
 2. **Fiat / quote currency** (USD EUR TRY CNY RUB INR NGN VND IDR ZAR PHP UAH)
-3. **Payment method** to filter on (e.g. `ABA Bank`; `all` for no filter)
+3. **Payment method** — the script fetches the merchant's *actual* live payment
+   methods from OKX and shows them as a **numbered list**; you pick one (or `all`
+   for no filter). No more typing the method name by hand.
 4. **Listen port** (default **80**; ports below 1024 start with `sudo`)
 5. **Refresh interval** in seconds (default **60**; must be ≥ 10 to respect OKX rate limits)
 6. **Custom domain** (optional — leave blank if you don't have one)
